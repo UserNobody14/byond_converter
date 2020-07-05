@@ -32,7 +32,7 @@ def line_by_line_conversion(instring, is_object: bool):
         return instring
 
 
-def particular_regex_conversions(str_item):
+def particular_regex_conversions(str_item, verb_name="placeholder"):
     # Add more of these.
     str1 = re.sub(
         r'istype\((\w+)\s*,\s*/?((\w+/)*)(\w+)\)',
@@ -46,7 +46,49 @@ def particular_regex_conversions(str_item):
         str1,
         flags=re.MULTILINE
     )
-    return str2
+    str3 = replace_automatic_return_val(str2)
+    # replaces the ..() syntax for calling a parent override of a function/proc
+    str4 = re.sub(
+        r'\.\.\((.*)\)',
+        lambda a: '.{}({})'.format(verb_name, a.group(1)),
+        str3
+    )
+    # to_chat regex? combine with symbol?
+    # to_chat\((\w+), \"<span class='(\w+)'>(.+)</span>\"\)
+    str5 = re.sub(
+        r'to_chat\((\w+), \"<span class=\'(\w+)\'>(.+)</span>\"\)',
+        lambda a: 'to_simple_chat_message({}, "{}", "{}")'.format(a.group(1), a.group(2), a.group(3)),
+        str4
+    )
+    # regex for strings
+    str6 = re.sub(
+        r'\"((?:(?:[^\"\\\[]|\\.)*|\[(?:[^\[\]]+)\])*)\"',
+        lambda a: replace_quoted_interpolation_string(a),
+        str5,
+        flags=re.MULTILINE
+    )
+    return str6
+
+
+def replace_automatic_return_val(str2):
+    str3 = re.sub(
+        r'^(\s*)\.\s*=(.+)',
+        lambda a: '{}byond_return_val = {}'.format(a.group(1), a.group(2)),
+        str2,
+        flags=re.MULTILINE
+    )
+    return str3 + '\n\treturn byond_return_val' if re.search(r'^(\s*)\.\s*=(.+)', str2) else str3
+
+
+def replace_quoted_interpolation_string(matchobj):
+    core_string = matchobj.group(1)
+    values_arr = re.finditer(r'\[([^\[\]]+)\]', core_string)
+    values_string = ' % [' + ', '.join(map(lambda a: a.group(1), values_arr)) + ']'
+    split_arr = re.split(r'\[(?:[^\[\]]+)\]', core_string)
+    if re.search(r'\[([^\[\]]+)\]', core_string):
+        return '"' + '%s'.join(split_arr) + '"' + values_string
+    else:
+        return '"' + '%s'.join(split_arr) + '"'
 
 
 def replace_if_statements(matchobj):
@@ -108,6 +150,7 @@ def get_arg_from_db(full_hierarchy_in, type_in):
 
 def get_new_name_for_full_hierarchy(type_in):
     session = Session()
+    print("trying to find new name for: ", type_in)
     extends_name: (str, str) = session.query(ByondClass.new_name, ByondClass.full_heritage_id).filter(
         ByondClass.full_heritage_id == type_in).one_or_none()
     (extends_name_value, extending_inheritance) = ('placeholder', '') if (extends_name is None) else extends_name
@@ -208,7 +251,7 @@ def convert_byond_verbs_to_godot(verb: ByondVerb):
     #     if each_param['needs_replacement']:
     #         text = text.replace(each_param['original_name'], each_param['replacement_var'])
     arg_string = ', '.join(args_result)
-    split_text = particular_regex_conversions(verb.text).split('\n')
+    split_text = particular_regex_conversions(verb.text, verb_name=verb.name).split('\n')
     text = '\n'.join(map(lambda a: line_by_line_conversion(a, False), split_text))
     return """
 # formerly a byond verb

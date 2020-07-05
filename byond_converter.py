@@ -99,7 +99,8 @@ class GdOutput(object):
 
 
 def process_and_save_each(item, session):
-    session.add(item)
+    local_object = session.merge(item)
+    session.add(local_object)
     session.commit()
 
 

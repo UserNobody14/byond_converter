@@ -72,3 +72,13 @@ def byond_class_with_proper_name(full_heritage: str, infile: str, item_name: str
                       path_first_found_in=infile,
                       text=remaining_lines,
                       verbs=[], procs=[])
+
+
+def to_other_byond(other, other_text):
+    return ByondClass(full_heritage_id=other.full_heritage_id,
+                      name=other.name,
+                      class_extends=other.class_extends,
+                      new_name=other.new_name,
+                      path_first_found_in=other.path_first_found_in,
+                      text=other_text,
+                      verbs=other.verbs, procs=other.procs)
