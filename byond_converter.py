@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
 
-from after_db_processing.process import convert_from_database_to_output
+from after_db_processing.process import convert_from_database_to_output, is_empty
 from before_db_processing.process import final_process_split
 
 
@@ -10,11 +10,69 @@ from before_db_processing.process import final_process_split
 #     Session = sessionmaker(bind=engine)
 #     pass
 
+# macro additions:
+# ^\h*#define\h+([A-Z_]+)(?:\(((?:\w+\s*,?\s*)+)\))?(?:\h+((?:[^\\\/\n]|\/(?!\/))+))?(\\?)(\/\/.+)?$
+# group 1 name of the macro
+# group 2 is the args list (if it exists)
+# group 3 value of the macro
+# group 4 is whether its multiline (if it exists)
+# group 5 is the comment (if it exists)
 
-def determine_regex_use(line):
-    return re.match('^\\s*(/(\\w+/)*)(\\w+)\\s*$', line) or re.match(
-        '^\\s*(/(\\w+/)+)proc/(\\w+)\\((.+)\\)\\s*$', line) or re.match(
-        '^\\s*(/(\\w+/)+)(\\w+)\\((.+)\\)\\s*$', line)
+# idea: regex reader returns a function
+
+# standard UNDEF regex:
+# ^\s*#undef\s*([A-Z_]+)\s*(\/\/.+)?$
+# 1 is the name of macro removed
+# 2 is the comment text
+
+# comment regex: ^\s*(\/\/.+)?$
+# comment is just group 1
+from initialize_db import Session
+
+
+def define_macro_regex(line):
+    return re.search(
+        r'^\s*#define\s+([A-Z_]+)(?:\(((?:\w+\s*,?\s*)+)\))?(?:\s+((?:[^\\/\n]|/(?!/))+))?(\\?)(//.+)?$',
+        line
+    )
+
+
+def determine_regex_use(line, current_mode):
+    matches = matches_proc_verb_or_class(line)
+    new_mode = 'any'
+    if current_mode == 'multiline_define':
+        matches = False
+        new_mode = 'any' if not re.match(r'.+\\.*', line) else 'multiline_define'
+    elif current_mode == 'any':
+        macro_match = define_macro_regex(line)
+        matches = matches_proc_verb_or_class(line) or macro_match
+        if macro_match and is_empty(macro_match.group(4)):
+            new_mode = 'any'
+        elif macro_match and not is_empty(macro_match.group(4)):
+            new_mode = 'multiline_define'
+        else:
+            new_mode = 'any'
+    return matches, new_mode
+
+
+def test_split_dm():
+    session = Session()
+    counter = 0
+    infile = './testinput/testcode/document.dm'
+    for elem in split_dm_file(infile):
+        processed_item = final_process_split(elem, infile, counter)
+        process_and_save_each(processed_item, session)
+        print(elem)
+        print(processed_item)
+        counter = counter + len(elem)
+
+
+def matches_proc_verb_or_class(line):
+    return re.match(r'^\s*(/(\w+/)*)(\w+)\s*$', line) or re.match(
+        r'^\s*(/(\w+/)+)proc/(\w+)\((.+)\)\s*$', line) or re.match(
+        r'^\s*(/(\w+/)+)(\w+)\((.+)\)\s*$', line) or re.match(
+        r'^\s*#undef\s*([A-Z_]+)\s*(//.+)?$', line
+    )
 
 
 # function 2 takes the filename & where it was in the tree
@@ -25,9 +83,11 @@ def split_dm_file(instring):
     list_of_lists = []
     new_list_exp = []
     counter = 0
+    current_mode = 'any'
     for line in objFile_loop:
         counter = counter + 1
-        if determine_regex_use(line):
+        (matches, current_mode) = determine_regex_use(line, current_mode)
+        if matches:
             if new_list_exp:
                 list_of_lists.append(new_list_exp)
             new_list_exp = [line]
@@ -115,11 +175,13 @@ def test_apply_conversion_to_file(infile, input_dir, outfile, session):
     # initialize_db()
     split = split_dm_file(infile)
     # processed_classes = map(lambda a: final_process_split(a, infile), split)
+    counter = 0
     for a in split:
         process_and_save_each(
-            final_process_split(a, infile),
+            final_process_split(a, infile, counter),
             session
         )
+        counter = counter + len(a)
     # process_and_save_to_database(processed_classes, session)
     convert_from_database_to_output(input_dir, outfile)
     pass

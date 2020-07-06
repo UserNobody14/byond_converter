@@ -2,3 +2,5 @@ tgstation/**
 tgstation
 testoutput/**
 testinput/**
+/testinput/
+/testoutput/
